@@ -1,49 +1,82 @@
 # PSVR2 SteamVR Launcher
 
-A small Windows utility that automatically starts SteamVR when a PSVR2 headset is powered on and closes SteamVR when the headset is powered off.
+A small Windows tray utility that automatically starts SteamVR when a PSVR2 headset is powered on and closes SteamVR when the headset is powered off.
 
-## What it does
+## v0.2.0
 
-- Watches the PSVR2 headset USB interface (`VID_054C`, `PID_0CDE`, `MI_00`)
-- Ignores the PSVR2 controllers
-- Starts SteamVR when the headset is turned on
-- Closes only SteamVR-owned processes when the headset is turned off
-- Does **not** terminate `steam.exe`
-- Prevents multiple copies from running
-- Writes a local diagnostic log
+This is the complete desktop/tray release.
+
+### Features
+
+- Detects the PSVR2 headset through its dedicated USB interface
+- Ignores PSVR2 controller activity
+- Automatically starts SteamVR when the headset powers on
+- Automatically closes only SteamVR-owned processes when the headset powers off
+- Never force-closes `steam.exe`
 - Runs automatically at Windows logon
+- Custom application and system tray icon
+- System tray menu
+- Manual **Start SteamVR now**
+- Manual **Stop SteamVR now**
+- Settings window
+- Configurable PSVR2 ON/OFF delay
+- Configurable Steam ready delay
+- Configurable polling interval
+- Optional Steam auto-start
+- Optional tray notifications
+- Optional detailed logging
+- Open log file from tray
+- Open install folder from tray
+- About/version information
+- Single-instance protection
 
-## One-click install
+## Default timing
 
-Download the latest release ZIP, extract it, and double-click:
+- PSVR2 ON delay: 0.75 seconds
+- PSVR2 OFF delay: 1.25 seconds
+- Steam ready delay: 0.75 seconds
+- Polling interval: 0.35 seconds
+
+These values can be changed from the tray icon:
+
+`Right-click tray icon -> Settings`
+
+## Install
+
+Download the release ZIP, extract it, then double-click:
 
 `Install.bat`
 
-The installer copies the standalone EXE to:
+No Python installation is required.
+
+The app installs to:
 
 `%LOCALAPPDATA%\PSVR2SteamVRLauncher`
 
-and creates a Windows Scheduled Task named:
+## Log
 
-`PSVR2 SteamVR Launcher`
+`%LOCALAPPDATA%\PSVR2SteamVRLauncher\psvr2_steamvr.log`
 
-No Python installation is required for release builds.
+## Settings
 
-## Uninstall
+`%LOCALAPPDATA%\PSVR2SteamVRLauncher\settings.json`
 
-Double-click:
+## Tray menu
 
-`Uninstall.bat`
+- Status
+- Start SteamVR now
+- Stop SteamVR now
+- Settings
+- Open log file
+- Open install folder
+- About
+- Exit
 
-## Current timing
+## Safe SteamVR shutdown
 
-- PSVR2 ON debounce: 1 second
-- PSVR2 OFF debounce: 2 seconds
-- Steam stable check: 1 second
+The launcher deliberately avoids SteamVR's global quit URI because it caused the Steam client itself to exit on the original test system.
 
-## Important implementation note
-
-Earlier versions used SteamVR's global quit URI. On the test system, that was associated with Steam itself exiting. This project instead shuts down only SteamVR-owned processes:
+It shuts down only SteamVR-owned processes:
 
 - `vrdashboard.exe`
 - `vrwebhelper.exe`
@@ -51,33 +84,31 @@ Earlier versions used SteamVR's global quit URI. On the test system, that was as
 - `vrcompositor.exe`
 - `vrserver.exe`
 
-It intentionally leaves these alone:
+It does not terminate:
 
 - `steam.exe`
 - `steamwebhelper.exe`
 
-## Development
+## Uninstall
 
-Run from source:
+Double-click:
 
-```powershell
-python src\psvr2_steamvr.py
-```
+`Uninstall.bat`
 
-Build a standalone EXE locally:
+## Development build
 
 ```powershell
-python -m pip install pyinstaller
-pyinstaller --onefile --noconsole --name PSVR2-SteamVR-Launcher src\psvr2_steamvr.py
+python -m pip install pyinstaller pillow pystray
+
+pyinstaller `
+  --onefile `
+  --noconsole `
+  --icon assets\icon.ico `
+  --add-data "assets\icon.png;assets" `
+  --add-data "assets\icon.ico;assets" `
+  --name PSVR2-SteamVR-Launcher `
+  src\psvr2_steamvr.py
 ```
-
-## Releases
-
-Pushing a Git tag such as `v0.1.0` triggers the included GitHub Actions workflow. It:
-
-1. builds the Windows EXE with PyInstaller;
-2. creates a release ZIP containing the EXE and installer;
-3. publishes the ZIP and EXE to a GitHub Release.
 
 ## Requirements
 

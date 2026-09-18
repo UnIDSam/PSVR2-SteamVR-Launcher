@@ -2,7 +2,6 @@ $ErrorActionPreference = "SilentlyContinue"
 
 $TaskName = "PSVR2 SteamVR Launcher"
 $InstallDir = Join-Path $env:LOCALAPPDATA "PSVR2SteamVRLauncher"
-$ExeDest = Join-Path $InstallDir "PSVR2-SteamVR-Launcher.exe"
 
 Write-Host ""
 Write-Host "=== Uninstall PSVR2 SteamVR Launcher ===" -ForegroundColor Cyan
@@ -13,8 +12,7 @@ Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Silent
 
 Get-CimInstance Win32_Process |
     Where-Object {
-        $_.Name -eq "PSVR2-SteamVR-Launcher.exe" -and
-        $_.ExecutablePath -eq $ExeDest
+        $_.Name -eq "PSVR2-SteamVR-Launcher.exe"
     } |
     ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
