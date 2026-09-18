@@ -21,8 +21,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install PyInstaller
-        run: python -m pip install --upgrade pyinstaller
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pyinstaller pillow pystray
 
       - name: Build EXE
         shell: powershell
@@ -30,6 +30,9 @@ jobs:
           pyinstaller `
             --onefile `
             --noconsole `
+            --icon assets\icon.ico `
+            --add-data "assets\icon.png;assets" `
+            --add-data "assets\icon.ico;assets" `
             --name PSVR2-SteamVR-Launcher `
             src\psvr2_steamvr.py
 
@@ -43,6 +46,7 @@ jobs:
           Copy-Item installer\Install.ps1 release\installer\
           Copy-Item installer\Uninstall.ps1 release\installer\
           Copy-Item README.md release\
+          Copy-Item CHANGELOG.md release\
           Compress-Archive -Path release\* -DestinationPath PSVR2-SteamVR-Launcher-${{ github.ref_name }}.zip -Force
 
       - name: Create GitHub Release
