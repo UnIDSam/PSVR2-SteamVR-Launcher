@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5
+
+- Fixed `Register-ScheduledTask: Access denied` during upgrades/install
+- Installer now automatically requests UAC administrator permission
+- Preserves the original Windows user when installing elevated
+- Removes the old scheduled task before recreating it
+- Launcher task still runs with normal user privileges
+- Uninstaller now handles task removal with UAC as well
+- Keeps all v0.2.4 support, logging, license and tray features
+
 ## 0.2.4
 
 - Added automatic log rotation at ~1 MB

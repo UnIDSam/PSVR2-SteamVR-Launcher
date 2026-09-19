@@ -6,7 +6,9 @@ echo.
 echo === PSVR2 SteamVR Launcher Installer ===
 echo.
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\Install.ps1"
+set "ORIGINAL_USER=%USERNAME%"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0installer\Install.ps1" -TargetUser "%ORIGINAL_USER%"
 
 echo.
 if errorlevel 1 (

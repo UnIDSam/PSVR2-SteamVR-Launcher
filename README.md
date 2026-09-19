@@ -2,7 +2,7 @@
 
 A small Windows tray utility that automatically starts SteamVR when a PSVR2 headset is powered on and closes SteamVR when the headset is powered off.
 
-## v0.2.4
+## v0.2.5
 
 This is the complete desktop/tray release.
 
@@ -155,3 +155,10 @@ This project is not affiliated with, endorsed by, or sponsored by Sony, PlayStat
 ## License
 
 MIT License. See `LICENSE`.
+
+
+## Installer permissions
+
+The installer automatically requests Windows administrator permission through UAC when it needs to create, replace, or remove the Windows Scheduled Task.
+
+The launcher itself still runs with normal user privileges after installation.

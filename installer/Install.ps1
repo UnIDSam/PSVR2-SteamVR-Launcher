@@ -1,18 +1,71 @@
 param(
-    [switch]$StartNow = $true
+    [switch]$StartNow = $true,
+    [string]$TargetUser = $env:USERNAME,
+    [switch]$Elevated
 )
 
 $ErrorActionPreference = "Stop"
 
-$Version = "0.2.4"
+$Version = "0.2.5"
 $TaskName = "PSVR2 SteamVR Launcher"
 $InstallDir = Join-Path $env:LOCALAPPDATA "PSVR2SteamVRLauncher"
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ExeSource = Join-Path (Split-Path -Parent $SourceDir) "PSVR2-SteamVR-Launcher.exe"
+$PackageRoot = Split-Path -Parent $SourceDir
+$ExeSource = Join-Path $PackageRoot "PSVR2-SteamVR-Launcher.exe"
 $ExeDest = Join-Path $InstallDir "PSVR2-SteamVR-Launcher.exe"
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+    return $principal.IsInRole(
+        [Security.Principal.WindowsBuiltInRole]::Administrator
+    )
+}
+
+# ------------------------------------------------------------
+# Elevate automatically if needed.
+# We preserve the original interactive Windows user so the
+# scheduled task still belongs to / runs for that user.
+# ------------------------------------------------------------
+
+if (-not (Test-IsAdministrator)) {
+
+    Write-Host "Administrator permission is required to update the Windows startup task."
+    Write-Host "Opening the Windows UAC prompt..."
+
+    $args = @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-File", "`"$PSCommandPath`"",
+        "-TargetUser", "`"$TargetUser`"",
+        "-Elevated"
+    )
+
+    if ($StartNow) {
+        $args += "-StartNow"
+    }
+
+    try {
+        $proc = Start-Process `
+            -FilePath "powershell.exe" `
+            -ArgumentList $args `
+            -Verb RunAs `
+            -Wait `
+            -PassThru
+
+        exit $proc.ExitCode
+    }
+    catch {
+        Write-Host ""
+        Write-Host "ERROR: Administrator permission was not granted." -ForegroundColor Red
+        Write-Host $_.Exception.Message
+        exit 1
+    }
+}
 
 Write-Host ""
 Write-Host "=== PSVR2 SteamVR Launcher v$Version Setup ===" -ForegroundColor Cyan
+Write-Host "Installing for Windows user: $TargetUser"
 Write-Host ""
 
 if (-not (Test-Path $ExeSource)) {
@@ -20,26 +73,41 @@ if (-not (Test-Path $ExeSource)) {
     Write-Host ""
     Write-Host "Run Install.bat from the extracted GitHub RELEASE ZIP."
     Write-Host "Do not run this installer directly from the source-code package."
-    Write-Host ""
-    Read-Host "Press Enter to close"
     exit 1
 }
+
+# Resolve the target user's LocalAppData.
+# For normal same-user UAC elevation, use the known user profile path.
+$TargetProfile = Join-Path $env:SystemDrive "Users\$TargetUser"
+$TargetLocalAppData = Join-Path $TargetProfile "AppData\Local"
+$InstallDir = Join-Path $TargetLocalAppData "PSVR2SteamVRLauncher"
+$ExeDest = Join-Path $InstallDir "PSVR2-SteamVR-Launcher.exe"
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 # ------------------------------------------------------------
-# Stop scheduled task first
+# Stop and remove existing startup task
 # ------------------------------------------------------------
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
 if ($task) {
     Write-Host "Existing startup task found - stopping it..."
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+
+    Stop-ScheduledTask `
+        -TaskName $TaskName `
+        -ErrorAction SilentlyContinue
+
+    Write-Host "Removing old startup task..."
+
+    Unregister-ScheduledTask `
+        -TaskName $TaskName `
+        -Confirm:$false `
+        -ErrorAction SilentlyContinue
 }
 
 # ------------------------------------------------------------
-# Stop every running launcher process
+# Stop all running launcher processes
 # ------------------------------------------------------------
 
 $running = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
@@ -52,7 +120,10 @@ if ($running) {
 
     foreach ($proc in $running) {
         try {
-            Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+            Stop-Process `
+                -Id $proc.ProcessId `
+                -Force `
+                -ErrorAction Stop
         }
         catch {
             Write-Host "Could not stop PID $($proc.ProcessId) immediately."
@@ -61,8 +132,7 @@ if ($running) {
 }
 
 # ------------------------------------------------------------
-# Wait until every launcher process is REALLY gone.
-# PyInstaller one-file builds can take a moment to release the EXE.
+# Wait for old launcher to fully exit and release the EXE
 # ------------------------------------------------------------
 
 $deadline = (Get-Date).AddSeconds(15)
@@ -83,18 +153,15 @@ do {
 
 if ($stillRunning) {
     Write-Host ""
-    Write-Host "ERROR: The old launcher is still running and could not be stopped." -ForegroundColor Red
-    Write-Host "Please close it from Task Manager and run Install.bat again."
-    Write-Host ""
-    Read-Host "Press Enter to close"
+    Write-Host "ERROR: The old launcher is still running." -ForegroundColor Red
+    Write-Host "Close it from Task Manager and run Install.bat again."
     exit 1
 }
 
-# Extra grace period for Windows to release file handles.
 Start-Sleep -Milliseconds 500
 
 # ------------------------------------------------------------
-# Copy with retries in case Windows still has a transient lock
+# Copy with retries for transient Windows file locks
 # ------------------------------------------------------------
 
 $copySucceeded = $false
@@ -102,17 +169,20 @@ $copySucceeded = $false
 for ($attempt = 1; $attempt -le 10; $attempt++) {
 
     try {
-        Copy-Item $ExeSource $ExeDest -Force -ErrorAction Stop
+        Copy-Item `
+            $ExeSource `
+            $ExeDest `
+            -Force `
+            -ErrorAction Stop
+
         $copySucceeded = $true
         break
     }
     catch {
         if ($attempt -eq 10) {
             Write-Host ""
-            Write-Host "ERROR: Could not replace the installed EXE after 10 attempts." -ForegroundColor Red
+            Write-Host "ERROR: Could not replace the installed EXE." -ForegroundColor Red
             Write-Host $_.Exception.Message
-            Write-Host ""
-            Read-Host "Press Enter to close"
             exit 1
         }
 
@@ -121,25 +191,30 @@ for ($attempt = 1; $attempt -le 10; $attempt++) {
     }
 }
 
-# Remove Mark-of-the-Web from installed copy.
+# Remove Mark-of-the-Web from the installed copy.
 Unblock-File -Path $ExeDest -ErrorAction SilentlyContinue
 
 # ------------------------------------------------------------
-# Recreate startup task
+# Create clean per-user logon task.
+# Registration is elevated, but the launcher itself runs with
+# normal user privileges.
 # ------------------------------------------------------------
 
 $Action = New-ScheduledTaskAction -Execute $ExeDest
-$Trigger = New-ScheduledTaskTrigger -AtLogOn
+$Trigger = New-ScheduledTaskTrigger -AtLogOn -User $TargetUser
 
 $Principal = New-ScheduledTaskPrincipal `
-    -UserId $env:USERNAME `
+    -UserId $TargetUser `
     -LogonType Interactive `
     -RunLevel Limited
 
 $Settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
-    -MultipleInstances IgnoreNew
+    -MultipleInstances IgnoreNew `
+    -StartWhenAvailable
+
+Write-Host "Creating Windows startup task..."
 
 Register-ScheduledTask `
     -TaskName $TaskName `
@@ -148,11 +223,15 @@ Register-ScheduledTask `
     -Principal $Principal `
     -Settings $Settings `
     -Description "Automatically starts and stops SteamVR with the PSVR2 headset." `
-    -Force | Out-Null
+    -Force `
+    -ErrorAction Stop | Out-Null
 
 if ($StartNow) {
     Write-Host "Starting PSVR2 SteamVR Launcher v$Version..."
-    Start-ScheduledTask -TaskName $TaskName
+
+    Start-ScheduledTask `
+        -TaskName $TaskName `
+        -ErrorAction Stop
 }
 
 Write-Host ""
@@ -166,4 +245,5 @@ Write-Host ""
 Write-Host "Look for the PSVR2 SteamVR Launcher icon in the Windows system tray."
 Write-Host "Support: https://github.com/UnIDSam/PSVR2-SteamVR-Launcher"
 Write-Host ""
-Read-Host "Press Enter to close"
+
+exit 0

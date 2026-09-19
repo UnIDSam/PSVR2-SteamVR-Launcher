@@ -18,7 +18,7 @@ import pystray
 from PIL import Image
 
 
-APP_VERSION = "0.2.4"
+APP_VERSION = "0.2.5"
 APP_NAME = "PSVR2 SteamVR Launcher"
 
 PROJECT_URL = "https://github.com/UnIDSam/PSVR2-SteamVR-Launcher"
@@ -139,7 +139,7 @@ def log(message, always=False):
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[{stamp}] {message}\\n")
+            f.write(f"[{stamp}] {message}\n")
 
     except Exception:
         pass
@@ -684,7 +684,7 @@ def clear_logs():
             root.withdraw()
             messagebox.showinfo(
                 APP_NAME,
-                f"Logs cleared.\\n\\nDeleted {deleted} old log file(s)."
+                f"Logs cleared.\n\nDeleted {deleted} old log file(s)."
             )
             root.destroy()
 
