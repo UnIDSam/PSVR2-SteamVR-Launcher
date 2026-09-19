@@ -47,6 +47,7 @@ jobs:
           Copy-Item installer\Uninstall.ps1 release\installer\
           Copy-Item README.md release\
           Copy-Item CHANGELOG.md release\
+          Copy-Item LICENSE release\
           Compress-Archive -Path release\* -DestinationPath PSVR2-SteamVR-Launcher-${{ github.ref_name }}.zip -Force
 
       - name: Create GitHub Release
