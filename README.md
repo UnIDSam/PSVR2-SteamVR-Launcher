@@ -2,7 +2,7 @@
 
 A small Windows tray utility that automatically starts SteamVR when a PSVR2 headset is powered on and closes SteamVR when the headset is powered off.
 
-## v0.2.0
+## v0.2.4
 
 This is the complete desktop/tray release.
 
@@ -32,10 +32,10 @@ This is the complete desktop/tray release.
 
 ## Default timing
 
-- PSVR2 ON delay: 0.75 seconds
-- PSVR2 OFF delay: 1.25 seconds
-- Steam ready delay: 0.75 seconds
-- Polling interval: 0.35 seconds
+- PSVR2 ON delay: 1.0 second
+- PSVR2 OFF delay: 2.0 seconds
+- Steam ready delay: 1.0 second
+- Polling interval: 0.75 seconds
 
 These values can be changed from the tray icon:
 
@@ -52,6 +52,15 @@ No Python installation is required.
 The app installs to:
 
 `%LOCALAPPDATA%\PSVR2SteamVRLauncher`
+
+
+## Windows SmartScreen
+
+GitHub release builds are currently unsigned, so Windows may show an **Unknown publisher** SmartScreen warning when you run the EXE directly from Downloads.
+
+The installer removes the downloaded-file Mark-of-the-Web from the installed copy before the Scheduled Task starts it.
+
+For a completely warning-free public distribution, the EXE would need to be signed with a trusted Windows code-signing certificate.
 
 ## Log
 
@@ -116,3 +125,33 @@ pyinstaller `
 - Steam
 - SteamVR
 - PSVR2 PC connection / adapter configured and working
+
+
+## Support
+
+For support, updates, bug reports, and releases:
+
+https://github.com/UnIDSam/PSVR2-SteamVR-Launcher
+
+Use GitHub Issues for bugs and support requests.
+
+## Log rotation
+
+The launcher keeps logs small automatically.
+
+- Current log: `psvr2_steamvr.log`
+- Rotates at approximately 1 MB
+- Keeps up to 3 backup logs
+- Oldest logs are deleted automatically
+
+You can also use:
+
+`Right-click tray icon -> Clear logs`
+
+## Disclaimer
+
+This project is not affiliated with, endorsed by, or sponsored by Sony, PlayStation, Valve, Steam, or SteamVR.
+
+## License
+
+MIT License. See `LICENSE`.

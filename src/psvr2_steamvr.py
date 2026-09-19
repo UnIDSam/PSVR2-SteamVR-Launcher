@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import webbrowser
 from datetime import datetime
 from pathlib import Path
 from tkinter import messagebox, ttk
@@ -17,17 +18,25 @@ import pystray
 from PIL import Image
 
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.4"
 APP_NAME = "PSVR2 SteamVR Launcher"
+
+PROJECT_URL = "https://github.com/UnIDSam/PSVR2-SteamVR-Launcher"
+ISSUES_URL = PROJECT_URL + "/issues"
+RELEASES_URL = PROJECT_URL + "/releases/latest"
+AUTHOR_NAME = "UnIDSam"
+
+LOG_MAX_BYTES = 1_000_000
+LOG_BACKUPS = 3
 
 PSVR2_DEVICE = r"USB\VID_054C&PID_0CDE&MI_00"
 CREATE_NO_WINDOW = 0x08000000
 
 DEFAULT_CONFIG = {
-    "check_interval": 0.35,
-    "on_stable_seconds": 0.75,
-    "off_stable_seconds": 1.25,
-    "steam_stable_seconds": 0.75,
+    "check_interval": 0.75,
+    "on_stable_seconds": 1.0,
+    "off_stable_seconds": 2.0,
+    "steam_stable_seconds": 1.0,
     "steam_ready_timeout": 60.0,
     "auto_start_steam": True,
     "notifications": True,
@@ -92,14 +101,46 @@ def get_config(key):
         return config.get(key, DEFAULT_CONFIG[key])
 
 
+def rotate_logs_if_needed():
+    try:
+        if not os.path.exists(LOG_FILE):
+            return
+
+        if os.path.getsize(LOG_FILE) < LOG_MAX_BYTES:
+            return
+
+        # Delete oldest backup first.
+        oldest = f"{LOG_FILE}.{LOG_BACKUPS}"
+
+        if os.path.exists(oldest):
+            os.remove(oldest)
+
+        # Shift .2 -> .3, .1 -> .2, etc.
+        for index in range(LOG_BACKUPS - 1, 0, -1):
+            src = f"{LOG_FILE}.{index}"
+            dst = f"{LOG_FILE}.{index + 1}"
+
+            if os.path.exists(src):
+                os.replace(src, dst)
+
+        os.replace(LOG_FILE, f"{LOG_FILE}.1")
+
+    except Exception:
+        pass
+
+
 def log(message, always=False):
     if not always and not get_config("detailed_logging"):
         return
 
     try:
+        rotate_logs_if_needed()
+
         stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(f"[{stamp}] {message}\n")
+            f.write(f"[{stamp}] {message}\\n")
+
     except Exception:
         pass
 
@@ -131,16 +172,52 @@ def notify(title, message):
 # SINGLE INSTANCE
 # ============================================================
 
-kernel32 = ctypes.windll.kernel32
+# Use a properly typed Windows named mutex.
+# Every version deliberately uses the SAME mutex name so an older
+# launcher and a newer launcher can never run together.
+
+from ctypes import wintypes
+
+MUTEX_NAME = r"Local\PSVR2_SteamVR_Launcher_SingleInstance"
+ERROR_ALREADY_EXISTS = 183
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+kernel32.CreateMutexW.argtypes = (
+    ctypes.c_void_p,
+    wintypes.BOOL,
+    wintypes.LPCWSTR,
+)
+kernel32.CreateMutexW.restype = wintypes.HANDLE
+
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+kernel32.CloseHandle.restype = wintypes.BOOL
+
+ctypes.set_last_error(0)
+
 mutex_handle = kernel32.CreateMutexW(
     None,
     False,
-    "PSVR2_SteamVR_Launcher_SingleInstance_v020",
+    MUTEX_NAME,
 )
 
-ERROR_ALREADY_EXISTS = 183
+mutex_error = ctypes.get_last_error()
 
-if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+if not mutex_handle:
+    log(
+        f"ERROR: Could not create single-instance mutex "
+        f"(Windows error {mutex_error}).",
+        always=True,
+    )
+    sys.exit(1)
+
+if mutex_error == ERROR_ALREADY_EXISTS:
+    log(
+        "Another PSVR2 SteamVR Launcher instance is already running. "
+        "This copy is exiting.",
+        always=True,
+    )
+    kernel32.CloseHandle(mutex_handle)
     sys.exit(0)
 
 
@@ -494,12 +571,18 @@ def start_steamvr(manual=False):
 
 
 def stop_steamvr(manual=False):
+    # Kill only SteamVR-owned processes.
+    # Never touch steam.exe or steamwebhelper.exe.
+    #
+    # vrserver.exe is killed first because it can keep/restart
+    # the rest of the SteamVR process set.
+
     steamvr_processes = [
-        "vrdashboard.exe",
-        "vrwebhelper.exe",
+        "vrserver.exe",
         "vrmonitor.exe",
         "vrcompositor.exe",
-        "vrserver.exe",
+        "vrdashboard.exe",
+        "vrwebhelper.exe",
     ]
 
     running = [
@@ -517,50 +600,110 @@ def stop_steamvr(manual=False):
     log("SteamVR processes before shutdown: " + ", ".join(running))
     set_status("Stopping SteamVR...")
 
-    for process_name in steamvr_processes:
-        if not process_running(process_name):
-            continue
+    deadline = time.monotonic() + 5.0
+    pass_number = 0
+    remaining = running[:]
 
-        log(f"Closing SteamVR process: {process_name}")
+    while remaining and time.monotonic() < deadline:
+        pass_number += 1
 
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/IM", process_name],
-                capture_output=True,
-                text=True,
-                creationflags=CREATE_NO_WINDOW,
-                timeout=10,
-            )
-        except Exception as e:
-            log(f"Could not close {process_name}: {e}", always=True)
+        log(
+            f"SteamVR shutdown pass {pass_number}: "
+            + ", ".join(remaining)
+        )
 
-    deadline = time.monotonic() + 2.0
-    remaining = []
+        for process_name in steamvr_processes:
+            if process_name not in remaining:
+                continue
 
-    while time.monotonic() < deadline:
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/IM", process_name],
+                    capture_output=True,
+                    text=True,
+                    creationflags=CREATE_NO_WINDOW,
+                    timeout=5,
+                )
+            except Exception as e:
+                log(
+                    f"Could not close {process_name}: {e}",
+                    always=True,
+                )
+
+        # Give Windows a brief moment to tear the processes down,
+        # then check again. If one respawned, the next pass catches it.
+        time.sleep(0.25)
+
         remaining = [
             name for name in steamvr_processes
             if process_running(name)
         ]
 
-        if not remaining:
-            break
-
-        time.sleep(0.15)
-
     if remaining:
         log(
-            "WARNING: SteamVR processes still running: "
+            "WARNING: SteamVR processes still running after retries: "
             + ", ".join(remaining),
             always=True,
         )
         set_status("SteamVR partially stopped")
     else:
-        log("SteamVR processes closed.")
+        log(
+            f"SteamVR processes closed after {pass_number} pass(es)."
+        )
         set_status("SteamVR stopped")
         notify(APP_NAME, "SteamVR stopped.")
 
+    # Confirm Steam itself stayed alive.
     log_steam_status(force=True)
+
+
+
+# ============================================================
+# SUPPORT / LOG HELPERS
+# ============================================================
+
+def clear_logs():
+    deleted = 0
+
+    try:
+        candidates = [LOG_FILE] + [
+            f"{LOG_FILE}.{index}"
+            for index in range(1, LOG_BACKUPS + 1)
+        ]
+
+        for path in candidates:
+            if os.path.exists(path):
+                os.remove(path)
+                deleted += 1
+
+        Path(LOG_FILE).touch()
+        log("Logs cleared.", always=True)
+
+        def show_result():
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showinfo(
+                APP_NAME,
+                f"Logs cleared.\\n\\nDeleted {deleted} old log file(s)."
+            )
+            root.destroy()
+
+        threading.Thread(target=show_result, daemon=True).start()
+
+    except Exception as e:
+        log(f"Could not clear logs: {e}", always=True)
+
+
+def open_project():
+    webbrowser.open(PROJECT_URL)
+
+
+def report_bug():
+    webbrowser.open(ISSUES_URL)
+
+
+def check_latest_release():
+    webbrowser.open(RELEASES_URL)
 
 
 # ============================================================
@@ -751,9 +894,12 @@ def show_about():
         messagebox.showinfo(
             APP_NAME,
             f"{APP_NAME}\n"
-            f"Version {APP_VERSION}\n\n"
-            "Automatically starts and stops SteamVR with PSVR2.\n\n"
-            "Steam itself is never force-closed.",
+            f"Version {APP_VERSION}\n"
+            f"Author: {AUTHOR_NAME}\n\n"
+            "Automatically starts and stops SteamVR with PSVR2.\n"
+            "Steam itself is never force-closed.\n\n"
+            f"Project / Support:\n{PROJECT_URL}\n\n"
+            "Not affiliated with Sony, Valve, PlayStation, or Steam.",
         )
 
         root.destroy()
@@ -792,6 +938,19 @@ def watcher_loop():
 
                 if candidate_state:
                     log("PSVR2 raw state -> ON")
+
+                    steam_pids_at_on = get_process_pids("steam.exe")
+
+                    if steam_pids_at_on:
+                        log(
+                            "STEAM AT PSVR2 ON -> "
+                            f"steam.exe PID(s): {steam_pids_at_on}"
+                        )
+                    else:
+                        log(
+                            "STEAM AT PSVR2 ON -> NOT RUNNING"
+                        )
+
                     set_status("PSVR2 detected")
                 else:
                     log("PSVR2 raw state -> OFF")
@@ -889,7 +1048,12 @@ def main():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Settings", lambda *_: open_settings()),
         pystray.MenuItem("Open log file", lambda *_: open_log()),
+        pystray.MenuItem("Clear logs", lambda *_: clear_logs()),
         pystray.MenuItem("Open install folder", lambda *_: open_install_folder()),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Project / Support", lambda *_: open_project()),
+        pystray.MenuItem("Report a bug", lambda *_: report_bug()),
+        pystray.MenuItem("Check latest release", lambda *_: check_latest_release()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("About", lambda *_: show_about()),
         pystray.MenuItem("Exit", tray_exit),
